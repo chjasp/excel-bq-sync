@@ -21,7 +21,7 @@ The main VBA module (`bq-sync.vba`) provides functionality to:
 ### 2. Cloud Function
 A Python-based Google Cloud Function that:
 - Handles service account authentication
-- Generates JWT tokens for BigQuery API access
+- Generates tokens for BigQuery API access
 - Provides a secure endpoint for token generation
 
 ## Setup
