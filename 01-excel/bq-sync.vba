@@ -1,92 +1,31 @@
-'====================
-' UI SECTION
-'====================
-
-' Subroutine to add Download and Upload buttons to the "Controls" sheet
-Public Sub AddStyledButtons()
-    Dim ws As Worksheet
-    Dim downloadBtn As Shape
-    Dim uploadBtn As Shape
-    
-    Set ws = ThisWorkbook.Worksheets("Controls")
-    
-    ' Check if buttons already exist and delete them
-    On Error Resume Next
-    ws.Shapes("DownloadButton").Delete
-    ws.Shapes("UploadButton").Delete
-    On Error GoTo 0
-    
-    ' Add the Download button as a shape
-    Set downloadBtn = ws.Shapes.AddShape(msoShapeRectangle, 100, 170, 120, 40)
-    With downloadBtn
-        .Name = "DownloadButton"
-        .OnAction = "DownloadButtonClick"
-        .TextFrame.Characters.Text = "Download"
-        .TextFrame.HorizontalAlignment = xlHAlignCenter
-        .TextFrame.VerticalAlignment = xlVAlignCenter
-        .TextFrame.Characters.Font.Bold = True
-        .TextFrame.Characters.Font.Size = 12
-        .Fill.ForeColor.RGB = RGB(42, 93, 203) ' Set background color
-        .Line.Visible = msoFalse ' Remove border if desired
-    End With
-    
-    ' Add the Upload button as a shape
-    Set uploadBtn = ws.Shapes.AddShape(msoShapeRectangle, 230, 170, 120, 40)
-    With uploadBtn
-        .Name = "UploadButton"
-        .OnAction = "UploadButtonClick"
-        .TextFrame.Characters.Text = "Upload"
-        .TextFrame.HorizontalAlignment = xlHAlignCenter
-        .TextFrame.VerticalAlignment = xlVAlignCenter
-        .TextFrame.Characters.Font.Bold = True
-        .TextFrame.Characters.Font.Size = 12
-        .Fill.ForeColor.RGB = RGB(42, 93, 203) ' Set background color
-        .Line.Visible = msoFalse ' Remove border if desired
-    End With
-    
-    MsgBox "Styled Download and Upload buttons added to the Controls sheet.", vbInformation
-End Sub
-
-
-'====================
-' DOWNLOAD SECTION
-'====================
-
-' Subroutine triggered by the Download button
-Public Sub DownloadButtonClick()
-    ExecuteBigQueryAndPopulateSheet
-End Sub
-
-' Subroutine to query BigQuery and add results to the "Data" sheet
 Public Sub ExecuteBigQueryAndPopulateSheet()
-    Dim jwt As String
+    Dim rawAccountInfo As String
+    Dim parsedAccountInfo As String
+    Dim accessToken As String
     Dim queryResult As String
     Dim sqlQuery As String
     Dim ws As Worksheet
     
     Debug.Print "Starting ExecuteBigQueryAndPopulateSheet"
-    
-    ' Get values from the Controls sheet
+
     Set ws = ThisWorkbook.Worksheets("Controls")
-    sqlQuery = ws.Range("C6").Value
-    Debug.Print "SQL Query: " & sqlQuery
+    rawAccountInfo = ws.Range("B1").Value
+    parsedAccountInfo = ParseServiceAccountInfo(rawAccountInfo)
+    sqlQuery = ws.Range("B5").Value
     
-    Debug.Print "Getting JWT..."
-    jwt = GetSignedJWT()
-    Debug.Print "JWT received: " & Left(jwt, 20) & "..." ' Print first 20 characters for security
+    Debug.Print "Getting AccessToken..."
+    accessToken = GetAccessToken(parsedAccountInfo)
     
     Debug.Print "Querying BigQuery..."
-    queryResult = QueryBigQuery(jwt, sqlQuery)
+    queryResult = QueryBigQuery(accessToken, sqlQuery)
+
     Debug.Print "Query Result received. Adding to 'Data' sheet..."
-    
-    ' Add the query result to the "Data" sheet
     AddQueryResultToDataSheet queryResult
     
     Debug.Print "ExecuteBigQueryAndPopulateSheet completed. Data added to 'Data' sheet."
     MsgBox "Data download completed.", vbInformation
 End Sub
 
-' Function to query BigQuery using the provided access token and SQL query
 Public Function QueryBigQuery(accessToken As String, query As String) As String
     Dim bigQueryURL As String
     Dim requestBody As String
@@ -94,14 +33,14 @@ Public Function QueryBigQuery(accessToken As String, query As String) As String
     
     Debug.Print "QueryBigQuery: Starting"
     
-    bigQueryURL = "https://bigquery.googleapis.com/bigquery/v2/projects/main-dev-431619/queries"
+    bigQueryURL = "https://bigquery.googleapis.com/bigquery/v2/projects/PROJECT_ID/queries"
     requestBody = "{""query"": """ & query & """, ""useLegacySql"": false}"
     
     Debug.Print "BigQuery URL: " & bigQueryURL
     Debug.Print "Request Body: " & requestBody
     
     ' Send the query to BigQuery
-    response = MacHttpRequestWithAuth(bigQueryURL, requestBody, accessToken)
+    response = HttpRequest(bigQueryURL, requestBody, accessToken)
     
     Debug.Print "Response:" & response
     
@@ -109,7 +48,6 @@ Public Function QueryBigQuery(accessToken As String, query As String) As String
     Debug.Print "QueryBigQuery: Completed"
 End Function
 
-' Subroutine to add query results to the "Data" sheet
 Private Sub AddQueryResultToDataSheet(queryResult As String)
     Dim ws As Worksheet
     Dim json As Object
@@ -174,207 +112,66 @@ JsonParseError:
     MsgBox "Error parsing query result: " & Err.Description, vbCritical
 End Sub
 
-'====================
-' UPLOAD SECTION
-'====================
-
-' Subroutine triggered by the Upload button
-Public Sub UploadButtonClick()
-    UploadDataToBigQuery
-End Sub
-
-' Subroutine to upload data to BigQuery
-Public Sub UploadDataToBigQuery()
-    Dim jwt As String
-    Dim projectId As String
-    Dim datasetName As String
-    Dim tableName As String
-    Dim ws As Worksheet
-    Dim dataWs As Worksheet
-    Dim uploadResult As String
-    Dim parsedDate As Date
+Private Function ParseServiceAccountInfo(rawAccountInfo As String) As String
+    Dim parsedAccountInfo As String
     
-    Debug.Print "Starting UploadDataToBigQuery"
-    
-    ' Get values from the Controls sheet
-    Set ws = ThisWorkbook.Worksheets("Controls")
-    projectId = ws.Range("C3").Value
-    datasetName = ws.Range("C4").Value
-    tableName = ws.Range("C5").Value
-    
-    ' Get the Data sheet
-    Set dataWs = ThisWorkbook.Worksheets("Data")
-    
-    ' Get JWT
-    Debug.Print "Getting JWT..."
-    jwt = GetSignedJWT()
-    Debug.Print "JWT received: " & Left(jwt, 20) & "..." ' Print first 20 characters for security
-    
-    ' Prepare and upload data using DML statements
-    Debug.Print "Preparing and uploading data..."
-    uploadResult = PrepareAndUploadData(jwt, projectId, datasetName, tableName, dataWs)
+    parsedAccountInfo = Trim(rawAccountInfo)
+    parsedAccountInfo = Replace(parsedAccountInfo, "\n", "\\n")
 
-    
-    Debug.Print "Upload Result: " & uploadResult
-    MsgBox "Data upload completed.", vbInformation
-End Sub
-
-' Function to upload data to BigQuery using the insertAll endpoint
-Private Function PrepareAndUploadData(jwt As String, projectId As String, datasetName As String, tableName As String, dataWs As Worksheet) As String
-    Dim dataRange As Range
-    Dim headers As Variant
-    Dim data As Variant
-    Dim i As Long, j As Long
-    Dim jsonRows As String
-    Dim requestBody As String
-    Dim bigQueryURL As String
-    Dim response As String
-    Dim batchSize As Long
-    Dim currentBatchSize As Long
-
-    ' Determine the data range
-    Set dataRange = dataWs.UsedRange
-
-    ' Ensure there's at least one row for headers
-    If dataRange.Rows.Count < 2 Then
-        MsgBox "No data found in the 'Data' sheet.", vbExclamation
-        PrepareAndUploadDataInsertAll = ""
-        Exit Function
+    If Left(parsedAccountInfo, 1) <> "{" Or Right(parsedAccountInfo, 1) <> "}" Then
+        parsedAccountInfo = "{" & parsedAccountInfo & "}"
     End If
-
-    ' Get headers and data
-    headers = dataRange.Rows(1).Value ' Headers are in the first row
-    data = dataRange.Offset(1, 0).Resize(dataRange.Rows.Count - 1, dataRange.Columns.Count).Value
-
-    ' Set the BigQuery insertAll URL
-    bigQueryURL = "https://bigquery.googleapis.com/bigquery/v2/projects/" & projectId & "/datasets/" & datasetName & "/tables/" & tableName & "/insertAll"
-
-    ' Initialize variables
-    batchSize = 500  ' Adjust based on your requirements and limits
-    currentBatchSize = 0
-    jsonRows = ""
-
-    ' Loop through the data rows and construct JSON rows
-    For i = 1 To UBound(data, 1)
-        Dim jsonRow As String
-        jsonRow = "{""json"":{"
-
-        For j = 1 To UBound(data, 2)
-            Dim columnName As String
-            Dim cellValue As String
-
-            columnName = headers(1, j)
-            cellValue = data(i, j)
-
-            ' Handle null values
-            If IsError(cellValue) Or IsEmpty(cellValue) Or cellValue = "" Then
-                cellValue = ""
-            Else
-                cellValue = CStr(cellValue)
-                ' Escape double quotes
-                cellValue = Replace(cellValue, """", "\""")
-            End If
-
-            ' Append to jsonRow
-            If j > 1 Then jsonRow = jsonRow & ","
-            jsonRow = jsonRow & """" & columnName & """:""" & cellValue & """"
-        Next j
-      
-        ' Add ingestion date
-        jsonRow = jsonRow & ",""ingestion_dt"":""" & Format(Now, "yyyy-MM-dd") & """"
-
-        ' Add ingestion timestamp
-        jsonRow = jsonRow & ",""ingestion_ts"":""" & Format(Now, "yyyy-MM-dd HH:mm:ss") & """"
-        
-        jsonRow = jsonRow & "}}"
-
-        ' Append to jsonRows
-        If jsonRows <> "" Then jsonRows = jsonRows & ","
-        jsonRows = jsonRows & jsonRow
-
-        currentBatchSize = currentBatchSize + 1
-
-        ' If batch size is reached or last row, send the request
-        If currentBatchSize >= batchSize Or i = UBound(data, 1) Then
-            requestBody = "{" & """rows"":[" & jsonRows & "]}"
-            Debug.Print "Request Body: " & requestBody
-
-            ' Send the request
-            response = MacHttpRequestWithAuth(bigQueryURL, requestBody, jwt)
-
-            ' Handle the response as needed
-            Debug.Print "Response: " & response
-
-            ' Reset for the next batch
-            jsonRows = ""
-            currentBatchSize = 0
-        End If
-    Next i
-
-    PrepareAndUploadData = "Data upload completed."
+    
+    ParseServiceAccountInfo = parsedAccountInfo
 End Function
 
-'====================
-' UTILITY FUNCTIONS
-'====================
 
-' Function to read service account info from the "Controls" sheet
-Private Function ReadServiceAccountInfo() As String
-    Dim ws As Worksheet
-    Dim keyContent As String
-    
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets("Controls")
-    On Error GoTo 0
-    
-    If ws Is Nothing Then
-        MsgBox "Sheet 'Controls' not found!", vbExclamation
-        Exit Function
-    End If
-    
-    ' Assuming the key content is in cell B1 of the "Controls" sheet
-    keyContent = ws.Range("C2").Value
-    
-    ' Remove any leading/trailing whitespace
-    keyContent = Trim(keyContent)
-    
-    ' Replace actual newline characters with \n
-    keyContent = Replace(keyContent, "\n", "\\n")
-    
-    ' Ensure the content is properly formatted as JSON
-    If Left(keyContent, 1) <> "{" Or Right(keyContent, 1) <> "}" Then
-        keyContent = "{" & keyContent & "}"
-    End If
-    
-    ReadServiceAccountInfo = keyContent
-End Function
-
-' Function to get a signed JWT from a cloud function
-Public Function GetSignedJWT() As String
+Public Function GetAccessToken(accountInfo As String) As String
     Dim cloudFunctionURL As String
     Dim response As String
     
-    Debug.Print "GetSignedJWT: Starting"
+    Debug.Print "GetAccessToken: Starting process"
     
-    cloudFunctionURL = "https://europe-west3-main-dev-431619.cloudfunctions.net/jwt-creator"
-    Debug.Print "Cloud Function URL: " & cloudFunctionURL
+    cloudFunctionURL = ""
     
-    ' Call the cloud function to get the JWT
-    response = MacHttpRequestWithAuth(cloudFunctionURL, "{""service_account_info"": " & ReadServiceAccountInfo() & "}")
+    Debug.Print "  Calling cloud function at: " & cloudFunctionURL
     
-    Debug.Print "RESPONSE:"
-    Debug.Print response
+    ' Call the cloud function to get the Access Token
+    response = HttpRequest(cloudFunctionURL, "{""service_account_info"": " & accountInfo & "}")
    
-    ' Extract the JWT from the response
-    GetSignedJWT = ParseJWTFromResponse(response)
-    Debug.Print "GetSignedJWT: Completed"
+    ' Extract the Access Token from the response
+    GetAccessToken = ParseAccessTokenFromResponse(response)
+    
+    Debug.Print "GetAccessToken: Process completed successfully"
 End Function
 
-' Function to make HTTP requests with optional authentication
-Private Function MacHttpRequestWithAuth(url As String, requestBody As String, Optional accessToken As String = "", Optional contentType As String = "application/json") As String
+Private Function ParseAccessTokenFromResponse(response As String) As String
+    Dim json As Object
+    
+    On Error GoTo ErrorHandler
+    
+    ' Parse the JSON response
+    Set json = JsonConverter.ParseJson(response)
+    
+    ' Extract the access token
+    If json.Exists("access_token") Then
+        ParseAccessTokenFromResponse = json("access_token")
+    Else
+        Debug.Print "Access token not found in response"
+        ParseAccessTokenFromResponse = ""
+    End If
+    
+    Exit Function
+
+ErrorHandler:
+    Debug.Print "Error in ParseAccessTokenFromResponse: " & Err.Description
+    ParseAccessTokenFromResponse = ""
+End Function
+
+Private Function HttpRequest(url As String, requestBody As String, Optional accessToken As String = "", Optional contentType As String = "application/json") As String
     Dim tempFilePath As String
     Dim curlCmd As String
-    Dim appleScriptCmd As String
+    Dim scriptCmd As String
     Dim headers As String
     
     tempFilePath = Environ("TMPDIR") & "temp_response.txt"
@@ -392,18 +189,16 @@ Private Function MacHttpRequestWithAuth(url As String, requestBody As String, Op
     
     ' Construct the curl command
     curlCmd = "curl -X POST " & headers & " -d '" & requestBody & "' " & url & " > " & tempFilePath
-    appleScriptCmd = "do shell script """ & Replace(curlCmd, """", "\""") & """"
-    Debug.Print "SCRIPT COMMAND:"
-    Debug.Print appleScriptCmd
+    scriptCmd = "do shell script """ & Replace(curlCmd, """", "\""") & """"
     
     ' Execute the curl command using MacScript
     On Error GoTo MacScriptError
-    MacScript appleScriptCmd
+    MacScript scriptCmd
     
     ' Read the response from the temporary file
     On Error GoTo ReadError
     Open tempFilePath For Input As #1
-    MacHttpRequestWithAuth = Input$(LOF(1), 1)
+    HttpRequest = Input$(LOF(1), 1)
     Close #1
     
     ' Delete the temporary file
@@ -416,27 +211,137 @@ Private Function MacHttpRequestWithAuth(url As String, requestBody As String, Op
 ' Error Handlers
 MacScriptError:
     MsgBox "Error executing shell script: " & Err.Description, vbCritical
-    MacHttpRequestWithAuth = ""
+    HttpRequest = ""
     Exit Function
 
 FileError:
     MsgBox "Error creating temporary file: " & Err.Description, vbCritical
-    MacHttpRequestWithAuth = ""
+    HttpRequest = ""
     Exit Function
 
 ReadError:
     MsgBox "Error reading response from temporary file: " & Err.Description, vbCritical
-    MacHttpRequestWithAuth = ""
+    HttpRequest = ""
     Exit Function
 End Function
 
-' Function to parse the JWT from the cloud function response
-Private Function ParseJWTFromResponse(response As String) As String
-    Dim startPos As Long
-    Dim endPos As Long
+' Subroutine to upload data to BigQuery
+Public Sub UploadDataToBigQuery()
+    Dim accessToken As String
+    Dim projectId As String
+    Dim datasetName As String
+    Dim tableName As String
+    Dim ws As Worksheet
+    Dim dataWs As Worksheet
+    Dim uploadResult As String
+    Dim rawAccountInfo As String
+    Dim parsedAccountInfo As String
     
-    startPos = InStr(response, """jwt"":") + 7
-    endPos = InStr(startPos, response, """") - 1
+    Debug.Print "Starting UploadDataToBigQuery"
     
-    ParseJWTFromResponse = Mid(response, startPos, endPos - startPos + 1)
+    ' Get values from the Controls sheet
+    Set ws = ThisWorkbook.Worksheets("Controls")
+    rawAccountInfo = ws.Range("B1").Value
+    parsedAccountInfo = ParseServiceAccountInfo(rawAccountInfo)
+    projectId = ws.Range("B2").Value
+    datasetName = ws.Range("B3").Value
+    tableName = ws.Range("B4").Value
+    
+    ' Get the Data sheet
+    Set dataWs = ThisWorkbook.Worksheets("Data")
+    
+    ' Get Access Token
+    Debug.Print "Getting Access Token..."
+    accessToken = GetAccessToken(parsedAccountInfo)
+    Debug.Print "Access Token received: " & Left(accessToken, 20) & "..."
+    
+    ' Prepare and upload data using DML statements
+    Debug.Print "Preparing and uploading data..."
+    uploadResult = PrepareAndUploadData(accessToken, projectId, datasetName, tableName, dataWs)
+    
+    Debug.Print "Upload Result: " & uploadResult
+    MsgBox "Data upload completed.", vbInformation
+End Sub
+
+' Function to upload data to BigQuery using the insertAll endpoint
+Private Function PrepareAndUploadData(accessToken As String, projectId As String, datasetName As String, tableName As String, dataWs As Worksheet) As String
+    Dim dataRange As Range
+    Dim headers As Variant
+    Dim data As Variant
+    Dim i As Long, j As Long
+    Dim jsonRows As String
+    Dim requestBody As String
+    Dim bigQueryURL As String
+    Dim response As String
+
+    ' Determine the data range
+    Set dataRange = dataWs.UsedRange
+
+    ' Ensure there's at least one row for headers
+    If dataRange.Rows.Count < 2 Then
+        MsgBox "No data found in the 'Data' sheet.", vbExclamation
+        PrepareAndUploadData = ""
+        Exit Function
+    End If
+
+    ' Get headers and data
+    headers = dataRange.Rows(1).Value ' Headers are in the first row
+    data = dataRange.Offset(1, 0).Resize(dataRange.Rows.Count - 1, dataRange.Columns.Count).Value
+
+    ' Set the BigQuery insertAll URL
+    bigQueryURL = "https://bigquery.googleapis.com/bigquery/v2/projects/" & projectId & "/datasets/" & datasetName & "/tables/" & tableName & "/insertAll"
+
+    ' Initialize jsonRows
+    jsonRows = ""
+
+    ' Loop through the data rows and construct JSON rows
+    For i = 1 To UBound(data, 1)
+        Dim jsonRow As String
+        jsonRow = "{""json"":{"
+
+        For j = 1 To UBound(data, 2)
+            Dim columnName As String
+            Dim cellValue As Variant
+
+            columnName = headers(1, j)
+            cellValue = data(i, j)
+
+            ' Handle different data types
+            If j > 1 Then jsonRow = jsonRow & ","
+            
+            jsonRow = jsonRow & """" & columnName & """:"
+            
+            ' Handle null values
+            If IsError(cellValue) Or IsEmpty(cellValue) Or cellValue = "" Then
+                jsonRow = jsonRow & "null"
+            ' Handle numbers
+            ElseIf IsNumeric(cellValue) Then
+                jsonRow = jsonRow & CStr(cellValue)
+            ' Handle booleans
+            ElseIf VarType(cellValue) = vbBoolean Then
+                jsonRow = jsonRow & LCase(CStr(cellValue))
+            ' Handle strings
+            Else
+                cellValue = Replace(CStr(cellValue), """", "\""")
+                cellValue = Replace(cellValue, vbNewLine, "\n")
+                jsonRow = jsonRow & """" & cellValue & """"
+            End If
+        Next j
+        
+        jsonRow = jsonRow & "}}"
+
+        ' Append to jsonRows
+        If jsonRows <> "" Then jsonRows = jsonRows & ","
+        jsonRows = jsonRows & jsonRow
+    Next i
+
+    ' Send all rows in a single request
+    requestBody = "{" & """rows"":[" & jsonRows & "]}"
+    Debug.Print "Request Body: " & requestBody
+
+    ' Send the request
+    response = HttpRequest(bigQueryURL, requestBody, accessToken)
+    Debug.Print "Response: " & response
+
+    PrepareAndUploadData = "Data upload completed."
 End Function
